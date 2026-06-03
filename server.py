@@ -1,9 +1,27 @@
-import asyncio
-import websockets
 import json
 import time
+import asyncio
+import websockets
 import os
 
+async def handler(websocket):
+    async for msg in websocket:
+        await websocket.send(msg)
+
+async def main():
+    port = int(os.environ.get("PORT", 10000))
+
+    print(f"Running on port {port}")
+
+    server = await websockets.serve(
+        handler,
+        "0.0.0.0",
+        port
+    )
+
+    await server.wait_closed()
+
+asyncio.run(main())
 # -----------------------------
 # ESTADO GLOBAL
 # -----------------------------
