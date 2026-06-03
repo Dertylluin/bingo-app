@@ -1,13 +1,7 @@
-# Python
+venv/
 __pycache__/
 *.pyc
 
-# entorno virtual
-venv/
-.env/
-
-# builds de Flet
-build/
-
-# sistema
-.DS_Store
+build/*
+!build/web/
+!build/web/**
