@@ -5,7 +5,7 @@ import threading
 import time
 
 # ── Servidor de producción o Localhost ──────────────────────────────────────
-SERVER = "wss://bio-bingo.onrender.com"
+SERVER = "wss://bingo-app-k1gl.onrender.com"
 
 print(f"Conectando a: {SERVER}")
 # ─────────────────────────────────────────────────────────────────────────────
