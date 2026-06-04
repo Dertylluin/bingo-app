@@ -1,27 +1,31 @@
+import asyncio
+import websockets
 import json
 import time
 import asyncio
-import websockets
 import os
 
-async def handler(websocket):
-    async for msg in websocket:
-        await websocket.send(msg)
-
+# -----------------------------
+# MAIN
+# -----------------------------
 async def main():
     port = int(os.environ.get("PORT", 10000))
 
-    print(f"Running on port {port}")
+    print(f"🚀 WS server running on {port}")
 
     server = await websockets.serve(
         handler,
         "0.0.0.0",
-        port
+        port,
+        ping_interval=PING_INTERVAL,
+        ping_timeout=TIMEOUT
     )
+
+    asyncio.create_task(heartbeat())
+    asyncio.create_task(save_snapshot())
 
     await server.wait_closed()
 
-asyncio.run(main())
 # -----------------------------
 # ESTADO GLOBAL
 # -----------------------------
@@ -313,27 +317,10 @@ async def handler(websocket):
             print(f"🔌 desconectado {player_id}")
 
 
-# -----------------------------
-# MAIN
-# -----------------------------
-async def main():
-    port = int(os.environ.get("PORT", 10000))
 
-    print(f"🚀 WS server running on {port}")
-
-    server = await websockets.serve(
-        handler,
-        "0.0.0.0",
-        port,
-        ping_interval=PING_INTERVAL,
-        ping_timeout=TIMEOUT
-    )
-
-    asyncio.create_task(heartbeat())
-    asyncio.create_task(save_snapshot())
-
-    await server.wait_closed()
 
 
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
     asyncio.run(main())
+    
