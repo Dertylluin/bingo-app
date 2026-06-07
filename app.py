@@ -468,8 +468,4 @@ def main(page: ft.Page):
         )
     )
 
-ft.run(
-    target=main,
-    port=int(os.environ.get("PORT", 8080)),
-    host="0.0.0.0"
-)
+ft.run(main, port=int(os.environ.get("PORT", 8080)), host="0.0.0.0")
