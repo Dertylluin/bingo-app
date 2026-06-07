@@ -462,7 +462,11 @@ def main(page: ft.Page):
                 card(ft.Column([
                     ft.Text("🎯 Tu cartón", size=18, weight=ft.FontWeight.BOLD, color=C_TEXT, text_align=ft.TextAlign.CENTER),
                     ft.Text("Toca las casillas que hayas completado", size=12, color=C_MUTED, text_align=ft.TextAlign.CENTER),
-                    grid_col,
+                    ft.Container(
+                        content=grid_col,
+                        height=500,
+                        scroll=ft.ScrollMode.AUTO,
+                    )
                 ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10), padding=16),
 
                 card(ft.Column([
