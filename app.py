@@ -464,11 +464,15 @@ def main(page: ft.Page):
                     ft.Text("Toca las casillas que hayas completado", size=12, color=C_MUTED, text_align=ft.TextAlign.CENTER),
                     ft.Container(
                     content=ft.Column(
-                        controls=[grid_col],
-                        scroll=ft.ScrollMode.AUTO,
-                        expand=True
-                        ),
-                        height=500,
+                    controls=[
+            ft.Row(
+                controls=[grid_col],
+                scroll=ft.ScrollMode.AUTO
+            )
+        ],
+        scroll=ft.ScrollMode.AUTO
+    ),
+    height=500,
 )
                 ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10), padding=16),
 
