@@ -463,10 +463,13 @@ def main(page: ft.Page):
                     ft.Text("🎯 Tu cartón", size=18, weight=ft.FontWeight.BOLD, color=C_TEXT, text_align=ft.TextAlign.CENTER),
                     ft.Text("Toca las casillas que hayas completado", size=12, color=C_MUTED, text_align=ft.TextAlign.CENTER),
                     ft.Container(
-                        content=grid_col,
-                        height=500,
+                    content=ft.Column(
+                        controls=[grid_col],
                         scroll=ft.ScrollMode.AUTO,
-                    )
+                        expand=True
+                        ),
+                        height=500,
+)
                 ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10), padding=16),
 
                 card(ft.Column([
