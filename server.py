@@ -9,7 +9,7 @@ import os
 # MAIN
 # -----------------------------
 async def main():
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 8080))
 
     print(f"🚀 WS server running on {port}")
 
