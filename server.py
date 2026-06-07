@@ -2,79 +2,53 @@ import asyncio
 import websockets
 import json
 import time
-import asyncio
 import os
+import redis
 
-# -----------------------------
-# MAIN
-# -----------------------------
-async def main():
-    port = int(os.environ.get("PORT", 8080))
+# =========================
+# CONFIG
+# =========================
+PORT = int(os.environ["PORT"])
+REDIS_URL = os.environ["REDIS_URL"]
 
-    print(f"🚀 WS server running on {port}")
-
-    server = await websockets.serve(
-        handler,
-        "0.0.0.0",
-        port,
-        ping_interval=PING_INTERVAL,
-        ping_timeout=TIMEOUT
-    )
-
-    asyncio.create_task(heartbeat())
-    asyncio.create_task(save_snapshot())
-
-    await server.wait_closed()
-
-# -----------------------------
-# ESTADO GLOBAL
-# -----------------------------
-rooms = {}
+r = redis.from_url(REDIS_URL, decode_responses=True)
 
 PING_INTERVAL = 20
 TIMEOUT = 40
 
+print(f"🚀 WS server running on {PORT}")
 
-# -----------------------------
-# SALA
-# -----------------------------
-def create_room(room_name):
-    room_name = room_name.lower().strip()
-
-    if room_name in rooms:
-        return None
-
-    rooms[room_name] = {
+# =========================
+# REDIS HELPERS
+# =========================
+def get_room(room):
+    data = r.get(f"room:{room}")
+    return json.loads(data) if data else {
         "players": {},
-        "start_time": time.time(),
-        "winner": None
+        "start_time": time.time()
     }
 
-    return room_name
+def save_room(room, data):
+    r.set(f"room:{room}", json.dumps(data))
 
 
-# -----------------------------
-# JUGADORES
-# -----------------------------
-def add_player(room_name, websocket, username):
-    room = rooms[room_name]
-    username_clean = username.strip().lower()
+# =========================
+# PLAYER HELPERS
+# =========================
+def add_player(room_name, username):
+    room = get_room(room_name)
+
+    username = username.strip().lower()
 
     # reconexión
     for pid, p in room["players"].items():
-        if p["username"].lower() == username_clean:
-            p["ws"] = websocket
-            p["online"] = True
-            p["last_ping"] = time.time()
-            print(f"🔄 Reconectado: {username_clean}")
-            return pid
+        if p["username"] == username:
+            return pid, room
 
-    # nuevo jugador
     pid = f"p{len(room['players']) + 1}"
 
     room["players"][pid] = {
-        "username": username_clean,
-        "ws": websocket,
+        "username": username,
         "tasks": [],
         "selected": [],
         "score": 0,
@@ -83,43 +57,13 @@ def add_player(room_name, websocket, username):
         "last_ping": time.time()
     }
 
-    print(f"➕ Nuevo jugador: {username_clean}")
-    return pid
+    save_room(room_name, room)
+    return pid, room
 
 
-# -----------------------------
-# LÍNEAS
-# -----------------------------
-def count_lines(selected, size):
-    completed = set()
-
-    # horizontales
-    for r in range(size):
-        if all(r * size + c in selected for c in range(size)):
-            completed.add(("row", r))
-
-    # verticales
-    for c in range(size):
-        if all(r * size + c in selected for r in range(size)):
-            completed.add(("col", c))
-
-    return completed
-# -----------------------------
-# HELPERS
-# -----------------------------
-def get_players(room):
-    return [
-        {
-            "id": pid,
-            "username": p["username"],
-            "score": p["score"],
-            "bingo": p["bingo"],
-            "online": p.get("online", True)
-        }
-        for pid, p in room["players"].items()
-    ]
-
-
+# =========================
+# RANKING
+# =========================
 def get_ranking(room):
     players = list(room["players"].values())
 
@@ -139,136 +83,126 @@ def get_ranking(room):
     ]
 
 
-# -----------------------------
-# BROADCAST (FIABLE)
-# -----------------------------
-async def broadcast(room):
+# =========================
+# BROADCAST
+# =========================
+async def broadcast(room_name, sockets):
+    room = get_room(room_name)
+
     message = {
         "type": "update",
-        "players": get_players(room),
+        "players": [
+            {"id": pid, "username": p["username"], "score": p["score"]}
+            for pid, p in room["players"].items()
+        ],
         "ranking": get_ranking(room)
     }
 
     dead = []
 
-    for pid, p in room["players"].items():
+    for ws in sockets.get(room_name, []):
         try:
-            ws = p.get("ws")
-            if ws:
-                await ws.send(json.dumps(message))
+            await ws.send(json.dumps(message))
         except:
-            dead.append(pid)
+            dead.append(ws)
 
-    for pid in dead:
-        if pid in room["players"]:
-            room["players"][pid]["online"] = False
+    for ws in dead:
+        sockets[room_name].remove(ws)
 
 
-# -----------------------------
+# =========================
 # HEARTBEAT
-# -----------------------------
-async def heartbeat():
+# =========================
+async def heartbeat(sockets):
     while True:
-        for room in rooms.values():
-            for p in room["players"].values():
+        for room_name, ws_list in sockets.items():
+            for ws in list(ws_list):
                 try:
-                    await p["ws"].send(json.dumps({"type": "ping"}))
+                    await ws.send(json.dumps({"type": "ping"}))
                 except:
-                    p["online"] = False
+                    ws_list.remove(ws)
 
         await asyncio.sleep(PING_INTERVAL)
 
 
-# -----------------------------
-# SNAPSHOT (FUTURO DB)
-# -----------------------------
-async def save_snapshot():
-    while True:
-        for room_name, room in rooms.items():
-            snapshot = {
-                "room": room_name,
-                "players": get_players(room),
-                "ranking": get_ranking(room),
-                "time": time.time()
-            }
+# =========================
+# COUNT LINES
+# =========================
+def count_lines(selected, size):
+    selected = set(selected)
+    completed = set()
 
-        await asyncio.sleep(10)
+    for r in range(size):
+        if all(r * size + c in selected for c in range(size)):
+            completed.add(("row", r))
+
+    for c in range(size):
+        if all(r * size + c in selected for r in range(size)):
+            completed.add(("col", c))
+
+    return completed
 
 
-# -----------------------------
+# =========================
 # HANDLER
-# -----------------------------
-async def handler(websocket):
+# =========================
+async def handler(websocket, path=None):
     room_name = None
     player_id = None
+
+    sockets = handler.sockets
 
     try:
         async for msg in websocket:
             data = json.loads(msg)
             action = data.get("type")
 
-            # CREATE ROOM
+            # ---------------- CREATE ROOM
             if action == "create_room":
-                room_name = create_room(data["room"])
+                room_name = data["room"].lower().strip()
                 username = data["username"]
 
-                if not room_name:
-                    await websocket.send(json.dumps({
-                        "type": "error",
-                        "message": "Sala existe"
-                    }))
-                    continue
+                player_id, room = add_player(room_name, username)
 
-                player_id = add_player(room_name, websocket, username)
+                sockets.setdefault(room_name, []).append(websocket)
 
                 await websocket.send(json.dumps({
                     "type": "joined",
                     "room": room_name,
                     "player": player_id,
-                    "players": get_players(rooms[room_name])
+                    "players": room["players"]
                 }))
 
-                await broadcast(rooms[room_name])
-
-            # JOIN ROOM
+            # ---------------- JOIN ROOM
             elif action == "join_room":
                 room_name = data["room"].lower().strip()
                 username = data["username"]
 
-                if room_name not in rooms:
-                    await websocket.send(json.dumps({
-                        "type": "error",
-                        "message": "No existe sala"
-                    }))
-                    continue
+                player_id, room = add_player(room_name, username)
 
-                player_id = add_player(room_name, websocket, username)
+                sockets.setdefault(room_name, []).append(websocket)
 
                 await websocket.send(json.dumps({
                     "type": "joined",
                     "room": room_name,
                     "player": player_id,
-                    "players": get_players(rooms[room_name])
+                    "players": room["players"]
                 }))
 
-                await broadcast(rooms[room_name])
-
-            # SET TASKS
+            # ---------------- SET TASKS
             elif action == "set_tasks":
-                room = rooms[data["room"]]
+                room = get_room(data["room"])
                 player = room["players"][data["player"]]
 
                 player["tasks"] = data["tasks"]
-                player["selected"] = set()
+                player["selected"] = []
                 player["score"] = 0
-                player["completed_lines"] = set()
 
-                await websocket.send(json.dumps({"type": "tasks_saved"}))
-                await broadcast(room)
+                save_room(data["room"], room)
 
-            # SELECT
+            # ---------------- SELECT
             elif action == "select":
-                room = rooms[data["room"]]
+                room = get_room(data["room"])
                 player = room["players"][data["player"]]
 
                 idx = data["index"]
@@ -276,51 +210,52 @@ async def handler(websocket):
                 if idx in player["selected"]:
                     player["selected"].remove(idx)
                 else:
-                    player["selected"].add(idx)
+                    player["selected"].append(idx)
 
                 size = int(len(player["tasks"]) ** 0.5)
+                completed = count_lines(player["selected"], size)
 
-                completed_now = count_lines(
-                player["selected"],
-                size
-                )   
+                player["score"] = len(player["selected"]) + len(completed) * 2
 
-                elapsed = time.time() - room["start_time"]
+                save_room(data["room"], room)
 
-                score = len(player["selected"])
+                await broadcast(data["room"], sockets)
 
-                for line in completed_now:
-
-                    if elapsed < 1800:       # < 30 min
-                        score += 5
-
-                    elif elapsed < 3600:     # 30-60 min
-                        score += 2
-
-                    else:                    # > 60 min
-                        score += 1
-
-                player["score"] = score
-
-                await broadcast(room)
-            # PONG
+            # ---------------- PONG
             elif action == "pong":
-                if room_name and player_id:
-                    rooms[room_name]["players"][player_id]["last_ping"] = time.time()
+                pass
 
     except Exception as e:
         print("❌ Error:", e)
 
     finally:
-        if room_name and room_name in rooms and player_id:
-            rooms[room_name]["players"].pop(player_id, None)
-            print(f"🔌 desconectado {player_id}")
+        if room_name and room_name in sockets:
+            if websocket in sockets[room_name]:
+                sockets[room_name].remove(websocket)
 
 
+# sockets global
+handler.sockets = {}
 
+
+# =========================
+# MAIN
+# =========================
+async def main():
+    server = await websockets.serve(
+        handler,
+        "0.0.0.0",
+        PORT,
+        ping_interval=PING_INTERVAL,
+        ping_timeout=TIMEOUT
+    )
+
+    print("✅ Server ready")
+
+    asyncio.create_task(heartbeat(handler.sockets))
+
+    await server.wait_closed()
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
     asyncio.run(main())
-    
