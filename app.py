@@ -140,6 +140,8 @@ def main(page: ft.Page):
         except websockets.exceptions.ConnectionClosed:
             state["connected"] = False
             set_status("🔴", "Conexión perdida")
+            time.sleep(2)
+            reconnect()
         except Exception as e:
             set_status("🔴", f"Error de red: {e}")
 
