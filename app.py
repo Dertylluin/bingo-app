@@ -57,11 +57,11 @@ def main(page: ft.Page):
     status_icon  = ft.Text("🔴", size=18)
     status_label = ft.Text("Sin conexión", size=14, color=C_MUTED)
 
-    ranking_col = ft.ListView(
-     spacing=6,
-     auto_scroll=False,
-     expand=True,
-    )
+    ranking_col = ft.Column(
+    spacing=6,
+    scroll=ft.ScrollMode.AUTO,
+    expand=True,
+)
     players_col  = ft.Column(spacing=4)
     grid_col     = ft.Column(scroll=ft.ScrollMode.AUTO,horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=6)
     board_inputs = ft.Column(spacing=8)
@@ -222,8 +222,7 @@ def main(page: ft.Page):
             is_me = r["player"] == state["username"]
             medal = medals[i] if i < 3 else f"{i+1}."
             bingo_tag = "  🎉 BINGO" if r.get("bingo") else ""
-            prog_text = f"{r.get('selected', 0)}/{r.get('total', 0)} casillas"
-
+            prog_text = f"{r.get('score', 0)} pts"
             ranking_col.controls.append(
                 ft.Container(
                     content=ft.Row([
@@ -470,8 +469,11 @@ def main(page: ft.Page):
                     ft.Text("🏆 Ranking en vivo", size=18, weight=ft.FontWeight.BOLD, color=C_TEXT),
                     ft.Container(
                         content=ranking_col,
-                        height=250,  # 👈 CLAVE
-                    )
+                        height=250,
+                        border_radius=12,
+                        padding=10,
+                        bgcolor=C_SURFACE,
+                        )
                         ], spacing=8))
             ]
         )
