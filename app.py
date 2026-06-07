@@ -5,7 +5,7 @@ import threading
 import time
 
 # ── Servidor de producción o Localhost ──────────────────────────────────────
-SERVER = "wss://bingo-app-k1gl.onrender.com"
+SERVER = "wss://robust-ambition-production-0220.up.railway.app"
 
 print(f"Conectando a: {SERVER}")
 # ─────────────────────────────────────────────────────────────────────────────
@@ -470,7 +470,7 @@ def main(page: ft.Page):
 
 ft.app(
     target=main,
-    view=ft.AppView.WEB_BROWSER,
+    view=ft.AppView.WEB,
     port=int(os.environ.get("PORT", 8080)),
     host="0.0.0.0"
 )
