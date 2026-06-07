@@ -57,7 +57,11 @@ def main(page: ft.Page):
     status_icon  = ft.Text("🔴", size=18)
     status_label = ft.Text("Sin conexión", size=14, color=C_MUTED)
 
-    ranking_col  = ft.Column(spacing=6)
+    ranking_col = ft.ListView(
+     spacing=6,
+     auto_scroll=False,
+     expand=True,
+    )
     players_col  = ft.Column(spacing=4)
     grid_col     = ft.Column(scroll=ft.ScrollMode.AUTO,horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=6)
     board_inputs = ft.Column(spacing=8)
@@ -464,8 +468,11 @@ def main(page: ft.Page):
 
                 card(ft.Column([
                     ft.Text("🏆 Ranking en vivo", size=18, weight=ft.FontWeight.BOLD, color=C_TEXT),
-                    ranking_col,
-                ], spacing=8)),
+                    ft.Container(
+                        content=ranking_col,
+                        height=250,  # 👈 CLAVE
+                    )
+                        ], spacing=8))
             ]
         )
     )
