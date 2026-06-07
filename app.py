@@ -59,7 +59,7 @@ def main(page: ft.Page):
 
     ranking_col  = ft.Column(spacing=6)
     players_col  = ft.Column(spacing=4)
-    grid_col     = ft.Column(horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=6)
+    grid_col     = ft.Column(scroll=ft.ScrollMode.AUTO,horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=6)
     board_inputs = ft.Column(spacing=8)
 
     username_tf  = ft.TextField(label="Tu nombre", border_color=C_PRIMARY, focused_border_color=C_ACCENT, color=C_TEXT, bgcolor=C_NEUTRAL, border_radius=12)
