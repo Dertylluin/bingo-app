@@ -35,7 +35,16 @@ def main(page: ft.Page):
     page.bgcolor = C_BG
     page.scroll = ft.ScrollMode.AUTO
     page.padding = 16
-
+    timer_text = ft.Text(
+        "⏱ 0s",
+        size=16,
+        color=C_ACCENT
+    )
+    def refresh_ui(e):
+        try:
+            page.update()
+        except Exception as ex:
+            show_error(f"Error refrescando UI: {ex}")
     # Importación local para evitar conflictos en sub-hilos
     import asyncio
     import websockets
@@ -56,11 +65,15 @@ def main(page: ft.Page):
     # ── Refs de UI ─────────────────────────────────────────────────────────────
     status_icon  = ft.Text("🔴", size=18)
     status_label = ft.Text("Sin conexión", size=14, color=C_MUTED)
+    refresh_btn = ft.FilledButton(
+        "🔄 Recargar",
+        on_click=refresh_ui,
+    )
 
-    ranking_col = ft.Column(
+    ranking_col = ft.ListView(
     spacing=6,
-    scroll=ft.ScrollMode.AUTO,
-    expand=True,
+    auto_scroll=False,
+    expand=True, 
 )
     players_col  = ft.Column(spacing=4)
     grid_col     = ft.Column(scroll=ft.ScrollMode.AUTO,horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=6)
@@ -103,19 +116,33 @@ def main(page: ft.Page):
         page.update()
 
     # ── Botones 100% Estables ────────────────────────────────────────────────
+    
     def primary_btn(btn_text, on_click_func):
-        return ft.Button(
-            content=ft.Text(btn_text, color=C_TEXT, weight=ft.FontWeight.BOLD),
-            bgcolor=C_PRIMARY,
-            style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=12), padding=15),
+        return ft.FilledButton(
+            content=ft.Text(
+                btn_text,
+                color=C_TEXT,
+                weight=ft.FontWeight.BOLD
+            ),
+            style=ft.ButtonStyle(
+                shape=ft.RoundedRectangleBorder(radius=12),
+                padding=15,
+            ),
             on_click=on_click_func,
         )
 
     def secondary_btn(btn_text, on_click_func, expand=False):
-        return ft.Button(
-            content=ft.Text(btn_text, color=C_PRIMARY, weight=ft.FontWeight.BOLD),
-            bgcolor=C_BG,
-            style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=12), side=ft.BorderSide(2, C_PRIMARY), padding=15),
+        return ft.OutlinedButton(
+            content=ft.Text(
+                btn_text,
+                color=C_PRIMARY,
+                weight=ft.FontWeight.BOLD
+            ),
+            style=ft.ButtonStyle(
+                shape=ft.RoundedRectangleBorder(radius=12),
+                side=ft.BorderSide(2, C_PRIMARY),
+                padding=15,
+            ),
             on_click=on_click_func,
             expand=expand,
         )
@@ -150,21 +177,36 @@ def main(page: ft.Page):
             set_status("🔴", f"Error de red: {e}")
 
     async def connect_and_send_ws(payload: dict):
+        print("ENTRANDO connect_and_send_ws")
+
         if state["ws"]:
-            try: await state["ws"].close()
-            except: pass
+            try:
+                await state["ws"].close()
+            except:
+                pass
+
         try:
-            state["ws"] = await websockets.connect(SERVER, ping_interval=20, ping_timeout=10)
+            print("Intentando conectar...")
+            state["ws"] = await websockets.connect(
+                SERVER,
+                ping_interval=20,
+                ping_timeout=10
+            )
+
+            print("CONECTADO")
+
             state["connected"] = True
-            set_status("🟢", f"Conectado como {state['username']}")
-            
-            # Escucha activa en segundo plano en el hilo de red
+
             asyncio.create_task(network_listen_loop())
+
+            print("Enviando payload:", payload)
+
             await state["ws"].send(json.dumps(payload))
+
+            print("PAYLOAD ENVIADO")
+
         except Exception as ex:
-            state["connected"] = False
-            set_status("🔴", "Servidor desconectado")
-            show_error(f"No se pudo conectar al servidor de Bingo.")
+            print("ERROR:", ex)
 
     async def send_payload_ws(payload: dict):
         if state["ws"] and state["connected"]:
@@ -175,7 +217,10 @@ def main(page: ft.Page):
 
     # ── Procesador de Mensajes del Servidor ───────────────────────────────────
     def handle_message(data: dict):
+        print("MENSAJE SERVIDOR:", data)
         t = data.get("type")
+        print("DATA UPDATE:", data)
+        print("RANKING:", data.get("ranking"))
 
         if t == "room_created":
             state["room"] = data["room"]
@@ -198,10 +243,22 @@ def main(page: ft.Page):
             show_info("✅ ¡Cartón activado en el servidor!")
 
         elif t == "update":
-            if "players" in data:
-                update_players(data["players"])
-            if "ranking" in data:
-                update_ranking(data["ranking"])
+            players = data.get("players", [])  # 👈 SIEMPRE definido
+
+            print("PLAYERS:", players)
+
+            update_players(players)
+
+            ranking = sorted(
+            players,
+            key=lambda x: x.get("score", 0),
+            reverse=True
+        )
+
+            update_ranking(ranking)
+            if "time" in data:
+                timer_text.value = f"⏱ {data['time']}s"
+            page.update()
                 
             winner = data.get("winner")
             if winner:
@@ -210,6 +267,7 @@ def main(page: ft.Page):
                 else:
                     set_status("🥇", f"Ganador: {winner}")
             page.update()
+            return
 
         elif t == "error":
             show_error(data.get("message", "Error del servidor"))
@@ -217,29 +275,48 @@ def main(page: ft.Page):
     # ── Actualizaciones de UI ─────────────────────────────────────────────────
     def update_ranking(ranking: list):
         ranking_col.controls.clear()
+
         medals = ["🥇", "🥈", "🥉"]
+
         for i, r in enumerate(ranking):
-            is_me = r["player"] == state["username"]
+
+            name = r.get("player") or r.get("username") or "unknown"
+            score = r.get("score", 0)
+
+            is_me = name == state["username"]
+
             medal = medals[i] if i < 3 else f"{i+1}."
-            bingo_tag = "  🎉 BINGO" if r.get("bingo") else ""
-            prog_text = f"{r.get('score', 0)} pts"
+
             ranking_col.controls.append(
                 ft.Container(
                     content=ft.Row([
                         ft.Text(medal, size=22),
+
                         ft.Column([
-                            ft.Text(r["player"] + bingo_tag, size=15, weight=ft.FontWeight.BOLD if is_me else ft.FontWeight.NORMAL, color=C_ACCENT if is_me else C_TEXT),
-                            ft.Text(prog_text, size=11, color=C_MUTED),
-                        ], spacing=1, expand=True),
-                        ft.Text(f"{r['score']} pts", size=16, weight=ft.FontWeight.BOLD, color=C_SUCCESS),
-                    ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                            ft.Text(
+                                name,
+                                size=15,
+                                weight=ft.FontWeight.BOLD if is_me else ft.FontWeight.NORMAL,
+                                color=C_ACCENT if is_me else C_TEXT,
+                            ),
+                            ft.Text(f"{score} pts", size=11, color=C_MUTED),
+                        ], expand=True),
+
+                        ft.Text(
+                            f"{score} pts",
+                            size=16,
+                            weight=ft.FontWeight.BOLD,
+                            color=C_SUCCESS
+                        ),
+                    ]),
                     bgcolor=C_PRIMARY + "33" if is_me else C_NEUTRAL,
                     border_radius=12,
                     padding=12,
                     border=ft.Border.all(2, C_ACCENT) if is_me else None,
                 )
             )
-        page.update()
+
+            page.update()
 
     def update_players(players: list):
         players_col.controls.clear()
@@ -250,13 +327,18 @@ def main(page: ft.Page):
     # ── Lógica de los Botones (Locales e Inmediatos) ───────────────────────────
     def build_board(e):
         state["size"] = int(size_dd.value)
+
+        print("REGENERANDO TABLERO:", state["size"])
+
+        # borrar tablero anterior
         board_inputs.controls.clear()
+
         n = state["size"] ** 2
+
         for i in range(n):
             board_inputs.controls.append(
                 ft.TextField(
-                    label=f"Casilla {i + 1}",
-                    dense=True,
+                    label=f"Casilla {i+1}",
                     border_color=C_PRIMARY,
                     focused_border_color=C_ACCENT,
                     color=C_TEXT,
@@ -264,6 +346,7 @@ def main(page: ft.Page):
                     border_radius=10,
                 )
             )
+
         page.update()
 
         # ── Guardar plantilla ─────────────────────────────────────────────
@@ -344,14 +427,31 @@ def main(page: ft.Page):
             show_error(f"Error cargando plantilla: {ex}")
     # ── Disparadores de Red Seguros ──────────────────────────────────────────
     def click_create_room(e):
+        print("CLICK CREAR")
+
         uname = username_tf.value.strip()
         rname = new_room_tf.value.strip()
-        if not uname or not rname:
-            show_error("Escribe tu nombre y el nombre de la sala."); return
-        state["username"] = uname
-        run_async_network(connect_and_send_ws({
-            "type": "create_room", "room": rname, "username": uname
-        }))
+
+        print("username =", uname)
+        print("room =", rname)
+
+        try:
+            state["username"] = uname
+
+            print("ANTES run_async_network")
+
+            run_async_network(
+                connect_and_send_ws({
+                    "type": "create_room",
+                    "room": rname,
+                    "username": uname,
+                })
+            )
+
+            print("DESPUÉS run_async_network")
+
+        except Exception as ex:
+            print("ERROR:", ex)
 
     def click_join_room(e):
         uname = username_tf.value.strip()
@@ -374,7 +474,7 @@ def main(page: ft.Page):
         state["selected"] = set()
         
         run_async_network(send_payload_ws({
-            "type": "set_tasks", "room": state["room"], "player": state["player"], "tasks": tasks
+            "type": "set_tasks", "room": state["room"], "player": state["player"], "tasks": tasks,"size": state["size"]
         }))
         build_game(tasks)
 
@@ -406,13 +506,17 @@ def main(page: ft.Page):
                             show_error("Falta conexión"); return
                         if index in state["selected"]:
                             state["selected"].discard(index)
+
                             cell_ref.bgcolor = C_NEUTRAL
                             cell_ref.border = ft.Border.all(1, C_PRIMARY + "55")
+
                         else:
                             state["selected"].add(index)
+
                             cell_ref.bgcolor = C_SUCCESS
                             cell_ref.border = ft.Border.all(2, C_SUCCESS)
-                        cell_ref.update()
+
+                        page.update()
                         run_async_network(send_payload_ws({
                             "type": "select", "room": state["room"], "player": state["player"], "index": index
                         }))
@@ -432,7 +536,7 @@ def main(page: ft.Page):
                     ft.Text("🎓 BINGO", size=32, weight=ft.FontWeight.BOLD, color=C_ACCENT, text_align=ft.TextAlign.CENTER),
                     ft.Text("de Graduación", size=16, color=C_MUTED, text_align=ft.TextAlign.CENTER),
                     ft.Divider(color=C_PRIMARY + "55"),
-                    ft.Row([status_icon, status_label], spacing=8),
+                    ft.Row([status_icon, status_label,timer_text,refresh_btn], spacing=8),
                 ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=6), padding=20),
 
                 card(ft.Column([
@@ -479,15 +583,15 @@ def main(page: ft.Page):
                 card(ft.Column([
                     ft.Text("🏆 Ranking en vivo", size=18, weight=ft.FontWeight.BOLD, color=C_TEXT),
                     ft.Container(
-                        content=ranking_col,
-                        height=250,
-                        border_radius=12,
-                        padding=10,
-                        bgcolor=C_SURFACE,
-                        )
+    content=ranking_col,
+    expand=False,
+    height=250,
+    padding=10,
+    border_radius=12,
+    bgcolor=C_SURFACE,
+)
                         ], spacing=8))
             ]
         )
     )
-
 ft.run(main, port=int(os.environ.get("PORT", 8080)), host="0.0.0.0")
