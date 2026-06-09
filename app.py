@@ -4,13 +4,9 @@ import os
 import threading
 import time
 
-# ── Servidor de producción o Localhost ──────────────────────────────────────
 SERVER = "wss://robust-ambition-production-0220.up.railway.app"
-
 print(f"Conectando a: {SERVER}")
-# ─────────────────────────────────────────────────────────────────────────────
 
-# ── Paleta de colores ─────────────────────────────────────────────────────────
 C_BG        = "#0f0f1a"   
 C_SURFACE   = "#1a1a2e"   
 C_PRIMARY   = "#7c3aed"   
@@ -19,8 +15,8 @@ C_SUCCESS   = "#10b981"
 C_NEUTRAL   = "#2d2d4e"   
 C_TEXT      = "#f1f5f9"   
 C_MUTED     = "#64748b"   
-C_ERROR     = "#ef4444"   
-# ─────────────────────────────────────────────────────────────────────────────
+C_ERROR     = "#ef4444" 
+
 
 def card(content, padding=15, bgcolor=C_SURFACE, radius=16):
     return ft.Container(
@@ -30,74 +26,76 @@ def card(content, padding=15, bgcolor=C_SURFACE, radius=16):
         padding=padding,
     )
 
+
 def main(page: ft.Page):
-    page.title = "🎓 Bingo Graduación"
+    page.title = "🎓 Bingo de la Graduacion"
     page.bgcolor = C_BG
     page.scroll = ft.ScrollMode.AUTO
     page.padding = 16
-    timer_text = ft.Text(
-        "⏱ 0s",
-        size=16,
-        color=C_ACCENT
-    )
-    def refresh_ui(e):
-        try:
-            page.update()
-        except Exception as ex:
-            show_error(f"Error refrescando UI: {ex}")
-    # Importación local para evitar conflictos en sub-hilos
+
     import asyncio
     import websockets
+    import uuid
 
-    # ── Estado de la aplicación ───────────────────────────────────────────────
+    # ── Estado ────────────────────────────────────────────────────────────────
     state = {
         "ws": None,
         "room": None,
-        "player": None,       
+        "player": None,
         "username": "",
         "tasks": [],
         "selected": set(),
         "size": 3,
         "connected": False,
-        "loop": None  # Aquí guardaremos el bucle de eventos del hilo de red
+        "loop": None,
+        "cells": {},
+        "client_id": None,
     }
 
-    # ── Refs de UI ─────────────────────────────────────────────────────────────
-    status_icon  = ft.Text("🔴", size=18)
-    status_label = ft.Text("Sin conexión", size=14, color=C_MUTED)
-    refresh_btn = ft.FilledButton(
-        "🔄 Recargar",
-        on_click=refresh_ui,
-    )
+    # ── Refs de UI ────────────────────────────────────────────────────────────
+    timer_text   = ft.Text("⏱ 0s", size=16, color=C_ACCENT)
+    status_icon  = ft.Text("●", size=18, color=C_ERROR)
+    status_label = ft.Text("Sin conexion", size=14, color=C_MUTED)
+    refresh_btn  = ft.FilledButton("🔄 Recargar", on_click=lambda e: page.update())
 
-    ranking_col = ft.ListView(
-    spacing=6,
-    auto_scroll=False,
-    expand=True, 
-)
+    ranking_col  = ft.ListView(spacing=6, auto_scroll=False, expand=True)
     players_col  = ft.Column(spacing=4)
-    grid_col     = ft.Column(scroll=ft.ScrollMode.AUTO,horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=6)
+    grid_col     = ft.Column(
+        scroll=ft.ScrollMode.AUTO,
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        spacing=6,
+    )
     board_inputs = ft.Column(spacing=8)
 
-    username_tf  = ft.TextField(label="Tu nombre", border_color=C_PRIMARY, focused_border_color=C_ACCENT, color=C_TEXT, bgcolor=C_NEUTRAL, border_radius=12)
-    room_tf = ft.TextField(label="Código de sala", border_color=C_PRIMARY, focused_border_color=C_ACCENT, color=C_TEXT, bgcolor=C_NEUTRAL, border_radius=12, capitalization=ft.TextCapitalization.CHARACTERS)
-    new_room_tf = ft.TextField(label="Nombre nueva sala", border_color=C_PRIMARY, focused_border_color=C_ACCENT, color=C_TEXT, bgcolor=C_NEUTRAL, border_radius=12, capitalization=ft.TextCapitalization.CHARACTERS)
-    
+    username_tf = ft.TextField(
+        label="Tu nombre", border_color=C_PRIMARY,
+        focused_border_color=C_ACCENT, color=C_TEXT,
+        bgcolor=C_NEUTRAL, border_radius=12,
+    )
+    room_tf = ft.TextField(
+        label="Codigo de sala", border_color=C_PRIMARY,
+        focused_border_color=C_ACCENT, color=C_TEXT,
+        bgcolor=C_NEUTRAL, border_radius=12,
+        capitalization=ft.TextCapitalization.CHARACTERS,
+    )
+    new_room_tf = ft.TextField(
+        label="Nombre nueva sala", border_color=C_PRIMARY,
+        focused_border_color=C_ACCENT, color=C_TEXT,
+        bgcolor=C_NEUTRAL, border_radius=12,
+        capitalization=ft.TextCapitalization.CHARACTERS,
+    )
     size_dd = ft.Dropdown(
-        label="Tamaño cartón",
-        options=[ft.dropdown.Option(str(i), f"{i}×{i} ({i*i} casillas)") for i in range(2, 11)],
+        label="Tamano carton",
+        options=[ft.dropdown.Option(str(i), f"{i}x{i} ({i*i} casillas)") for i in range(2, 11)],
         value="3",
-        border_color=C_PRIMARY,
-        focused_border_color=C_ACCENT,
-        color=C_TEXT,
-        bgcolor=C_NEUTRAL,
-        border_radius=12,
+        border_color=C_PRIMARY, focused_border_color=C_ACCENT,
+        color=C_TEXT, bgcolor=C_NEUTRAL, border_radius=12,
     )
 
     snack_bar = ft.SnackBar(content=ft.Text(""), bgcolor=C_ERROR)
     page.overlay.append(snack_bar)
 
-    # ── Notificaciones e Interfaz Segura ──────────────────────────────────────
+    # ── Notificaciones ────────────────────────────────────────────────────────
     def show_error(msg: str):
         snack_bar.content = ft.Text(msg, color=C_TEXT)
         snack_bar.bgcolor = C_ERROR
@@ -110,44 +108,33 @@ def main(page: ft.Page):
         snack_bar.open = True
         page.update()
 
-    def set_status(icon: str, label: str):
-        status_icon.value  = icon
+    def set_status(icon_color: str, label: str):
+        status_icon.color  = icon_color
         status_label.value = label
         page.update()
 
-    # ── Botones 100% Estables ────────────────────────────────────────────────
-    
-    def primary_btn(btn_text, on_click_func):
+    # ── Botones ───────────────────────────────────────────────────────────────
+    def primary_btn(text, on_click):
         return ft.FilledButton(
-            content=ft.Text(
-                btn_text,
-                color=C_TEXT,
-                weight=ft.FontWeight.BOLD
-            ),
+            content=ft.Text(text, color=C_TEXT, weight=ft.FontWeight.BOLD),
             style=ft.ButtonStyle(
-                shape=ft.RoundedRectangleBorder(radius=12),
-                padding=15,
+                shape=ft.RoundedRectangleBorder(radius=12), padding=15
             ),
-            on_click=on_click_func,
+            on_click=on_click,
         )
 
-    def secondary_btn(btn_text, on_click_func, expand=False):
+    def secondary_btn(text, on_click, expand=False):
         return ft.OutlinedButton(
-            content=ft.Text(
-                btn_text,
-                color=C_PRIMARY,
-                weight=ft.FontWeight.BOLD
-            ),
+            content=ft.Text(text, color=C_PRIMARY, weight=ft.FontWeight.BOLD),
             style=ft.ButtonStyle(
                 shape=ft.RoundedRectangleBorder(radius=12),
-                side=ft.BorderSide(2, C_PRIMARY),
-                padding=15,
+                side=ft.BorderSide(2, C_PRIMARY), padding=15,
             ),
-            on_click=on_click_func,
+            on_click=on_click,
             expand=expand,
         )
 
-    # ── Hilo de Red Dedicado (Evita congelamientos por completo) ─────────────
+    # ── Hilo de red dedicado ──────────────────────────────────────────────────
     def start_network_thread():
         loop = asyncio.new_event_loop()
         state["loop"] = loop
@@ -157,441 +144,400 @@ def main(page: ft.Page):
     start_network_thread()
 
     def run_async_network(coro):
-        """Envía una tarea al hilo de red independiente de manera segura."""
         if state["loop"]:
             asyncio.run_coroutine_threadsafe(coro, state["loop"])
 
-    # ── Operaciones Asíncronas de Red ─────────────────────────────────────────
+    # ── Red ───────────────────────────────────────────────────────────────────
     async def network_listen_loop():
         try:
             async for raw in state["ws"]:
-                data = json.loads(raw)
-                # Procesamos el mensaje redirigiéndolo de vuelta a la UI de Flet
-                handle_message(data)
+                handle_message(json.loads(raw))
         except websockets.exceptions.ConnectionClosed:
             state["connected"] = False
-            set_status("🔴", "Conexión perdida")
-            time.sleep(2)
-            reconnect()
-        except Exception as e:
-            set_status("🔴", f"Error de red: {e}")
+            set_status(C_ERROR, "Conexion perdida")
+        except Exception as ex:
+            set_status(C_ERROR, f"Error de red: {ex}")
 
     async def connect_and_send_ws(payload: dict):
-        print("ENTRANDO connect_and_send_ws")
-
         if state["ws"]:
             try:
                 await state["ws"].close()
-            except:
+            except Exception:
                 pass
-
         try:
-            print("Intentando conectar...")
             state["ws"] = await websockets.connect(
-                SERVER,
-                ping_interval=20,
-                ping_timeout=10
+                SERVER, ping_interval=20, ping_timeout=10
             )
-
-            print("CONECTADO")
-
             state["connected"] = True
-
-            asyncio.create_task(network_listen_loop())
-
-            print("Enviando payload:", payload)
-
+            # Lanzar el loop de escucha en el mismo hilo de red
+            state["loop"].create_task(network_listen_loop())
             await state["ws"].send(json.dumps(payload))
-
-            print("PAYLOAD ENVIADO")
-
         except Exception as ex:
-            print("ERROR:", ex)
+            set_status(C_ERROR, f"No se pudo conectar: {ex}")
 
     async def send_payload_ws(payload: dict):
         if state["ws"] and state["connected"]:
             try:
                 await state["ws"].send(json.dumps(payload))
             except Exception as ex:
-                show_error(f"Error al enviar datos: {ex}")
+                show_error(f"Error al enviar: {ex}")
 
-    # ── Procesador de Mensajes del Servidor ───────────────────────────────────
-    def handle_message(data: dict):
-        print("MENSAJE SERVIDOR:", data)
-        t = data.get("type")
-        print("DATA UPDATE:", data)
-        print("RANKING:", data.get("ranking"))
+    # ── Persistencia de sesion ────────────────────────────────────────────────
+    # FIX PRINCIPAL: guardamos client_id + datos de sesion en shared_preferences
+    async def persist_session():
+        """Guarda el estado actual de sesion para sobrevivir F5."""
+        await page.shared_preferences.set("client_id",  state["client_id"] or "")
+        await page.shared_preferences.set("s_room",     state["room"]      or "")
+        await page.shared_preferences.set("s_player",   state["player"]    or "")
+        await page.shared_preferences.set("s_username", state["username"]  or "")
 
-        if t == "room_created":
-            state["room"] = data["room"]
-            state["player"] = data["player"]      
-            state["username"] = data["username"]
-            set_status("🏠", f"Sala: {data['room'].upper()}")
-            show_info(f"Sala «{data['room'].upper()}» creada con éxito.")
+    async def load_and_reconnect():
+        """
+        Se llama UNA vez al arrancar la pagina.
+        1. Carga (o genera) el client_id persistido.
+        2. Intenta reconectar al servidor con ese client_id.
+        """
+        # -- Cargar / crear client_id ------------------------------------------
+        cid = await page.shared_preferences.get("client_id")
+        if not cid:
+            cid = str(uuid.uuid4())
+            await page.shared_preferences.set("client_id", cid)
+        state["client_id"] = cid
 
-        elif t == "joined":
-            state["room"] = data["room"]
-            state["player"] = data["player"]      
-            set_status("🚪", f"Sala: {data['room'].upper()}")
-            show_info(f"Te has unido a la sala «{data['room'].upper()}»")
+        # -- Restaurar datos de sesion locales ---------------------------------
+        state["room"]     = await page.shared_preferences.get("s_room")     or None
+        state["player"]   = await page.shared_preferences.get("s_player")   or None
+        state["username"] = await page.shared_preferences.get("s_username") or ""
 
-        elif t == "player_joined":
-            update_players(data.get("players", []))
-            show_info(f"🎉 {data['player']} entró a la sala")
+        if state["username"]:
+            username_tf.value = state["username"]
+            page.update()
 
-        elif t == "tasks_saved":
-            show_info("✅ ¡Cartón activado en el servidor!")
+        print(f"[INIT] client_id={cid}  room={state['room']}  player={state['player']}")
 
-        elif t == "update":
-            players = data.get("players", [])  # 👈 SIEMPRE definido
-
-            print("PLAYERS:", players)
-
-            update_players(players)
-
-            ranking = sorted(
-            players,
-            key=lambda x: x.get("score", 0),
-            reverse=True
+        # -- Intentar reconexion al servidor -----------------------------------
+        # Solo tiene sentido si el servidor aun tiene la sala en memoria
+        run_async_network(
+            connect_and_send_ws({
+                "type": "reconnect",
+                "client_id": cid,
+            })
         )
 
-            update_ranking(ranking)
-            if "time" in data:
-                timer_text.value = f"⏱ {data['time']}s"
+    # ── Procesador de mensajes ────────────────────────────────────────────────
+    def handle_message(data: dict):
+        print("MSG:", data.get("type"), data)
+        t = data.get("type")
+
+        if t == "joined":
+            state["room"]   = data["room"]
+            state["player"] = data["player"]
+            if data.get("client_id"):
+                state["client_id"] = data["client_id"]
+            # Persistir sesion cada vez que (re)entramos a una sala
+            run_async_network(persist_session())
+            set_status(C_SUCCESS, f"Sala: {data['room'].upper()}")
+            show_info(f"Unido a la sala {data['room'].upper()}")
+
+        elif t == "update":
+            update_players(data.get("players", []))
+            update_ranking(data.get("ranking", []))
+            selected_map = data.get("selected", {})
+            my_selected  = selected_map.get(state["player"], [])
+            state["selected"] = set(my_selected)
+            if state.get("tasks"):
+                build_game(state["tasks"])
+            # Actualizar timer
+            timer_text.value = f"{data.get('time', 0)}s"
             page.update()
-                
-            winner = data.get("winner")
-            if winner:
-                if winner == state["username"]:
-                    set_status("🏆", "¡BINGO! ¡HAS GANADO!")
-                else:
-                    set_status("🥇", f"Ganador: {winner}")
-            page.update()
-            return
 
         elif t == "error":
-            show_error(data.get("message", "Error del servidor"))
+            show_error(data.get("message", data.get("msg", "Error del servidor")))
 
-    # ── Actualizaciones de UI ─────────────────────────────────────────────────
+        elif t == "reconnected":
+            # El servidor nos reconocio: restaurar estado completo
+            state["room"]     = data["room"]
+            state["player"]   = data["player"]
+            state["selected"] = set(data.get("selected", []))
+            state["size"]     = data.get("size") or state["size"]
+            state["tasks"]    = data.get("tasks") or []
+
+            # Persistir por si acaso
+            run_async_network(persist_session())
+
+            set_status(C_SUCCESS, f"Sala: {state['room'].upper()} (reconectado)")
+
+            if state["tasks"]:
+                build_game(state["tasks"])
+            else:
+                show_info("Reconectado. Vuelve a activar tu carton.")
+
+        elif t == "tasks_saved":
+            show_info("Carton activado en el servidor!")
+
+    # ── Actualizar UI ─────────────────────────────────────────────────────────
     def update_ranking(ranking: list):
         ranking_col.controls.clear()
-
         medals = ["🥇", "🥈", "🥉"]
-
         for i, r in enumerate(ranking):
-
-            name = r.get("player") or r.get("username") or "unknown"
-            score = r.get("score", 0)
-
-            is_me = name == state["username"]
-
-            medal = medals[i] if i < 3 else f"{i+1}."
-
+            name    = r.get("player", "?")
+            score   = r.get("score", 0)
+            is_me   = name == state["username"].lower()
+            medal   = medals[i] if i < 3 else f"{i+1}."
             ranking_col.controls.append(
                 ft.Container(
                     content=ft.Row([
-                        ft.Text(medal, size=22),
-
+                        ft.Text(medal, size=20, weight=ft.FontWeight.BOLD,
+                                color=C_ACCENT),
                         ft.Column([
                             ft.Text(
-                                name,
-                                size=15,
+                                name, size=15,
                                 weight=ft.FontWeight.BOLD if is_me else ft.FontWeight.NORMAL,
                                 color=C_ACCENT if is_me else C_TEXT,
                             ),
                             ft.Text(f"{score} pts", size=11, color=C_MUTED),
                         ], expand=True),
-
-                        ft.Text(
-                            f"{score} pts",
-                            size=16,
-                            weight=ft.FontWeight.BOLD,
-                            color=C_SUCCESS
-                        ),
+                        ft.Text(f"{score} pts", size=16,
+                                weight=ft.FontWeight.BOLD, color=C_SUCCESS),
                     ]),
                     bgcolor=C_PRIMARY + "33" if is_me else C_NEUTRAL,
-                    border_radius=12,
-                    padding=12,
+                    border_radius=12, padding=12,
                     border=ft.Border.all(2, C_ACCENT) if is_me else None,
                 )
             )
-
-            page.update()
+        page.update()
 
     def update_players(players: list):
         players_col.controls.clear()
         for p in players:
-            players_col.controls.append(ft.Text(f"👤 {p}", size=13, color=C_TEXT))
+            name = p.get("player", p) if isinstance(p, dict) else p
+            players_col.controls.append(
+                ft.Text(f"- 👤{name}", size=13, color=C_TEXT)
+            )
         page.update()
 
-    # ── Lógica de los Botones (Locales e Inmediatos) ───────────────────────────
+    # ── Acciones de UI ────────────────────────────────────────────────────────
     def build_board(e):
         state["size"] = int(size_dd.value)
-
-        print("REGENERANDO TABLERO:", state["size"])
-
-        # borrar tablero anterior
         board_inputs.controls.clear()
-
-        n = state["size"] ** 2
-
-        for i in range(n):
+        for i in range(state["size"] ** 2):
             board_inputs.controls.append(
                 ft.TextField(
                     label=f"Casilla {i+1}",
-                    border_color=C_PRIMARY,
-                    focused_border_color=C_ACCENT,
-                    color=C_TEXT,
-                    bgcolor=C_NEUTRAL,
-                    border_radius=10,
+                    border_color=C_PRIMARY, focused_border_color=C_ACCENT,
+                    color=C_TEXT, bgcolor=C_NEUTRAL, border_radius=10,
                 )
             )
-
         page.update()
 
-        # ── Guardar plantilla ─────────────────────────────────────────────
-        # ── Guardar plantilla ─────────────────────────────────────────────
     async def save_template(e):
-        try:
-            if not board_inputs.controls:
-                show_error("Primero genera un cartón.")
-                return
+        if not board_inputs.controls:
+            show_error("Primero genera un carton."); return
+        tasks = [c.value or "" for c in board_inputs.controls if isinstance(c, ft.TextField)]
+        await page.shared_preferences.set(
+            "bingo_template",
+            json.dumps({"size": str(state["size"]), "tasks": tasks}),
+        )
+        show_info("Plantilla guardada")
 
-            tasks = []
-
-            for control in board_inputs.controls:
-                if isinstance(control, ft.TextField):
-                    tasks.append(control.value or "")
-
-            template_data = {
-                "size": str(state["size"]),
-                "tasks": tasks
-            }
-
-            # Guardado local REAL
-            await page.shared_preferences.set(
-                "bingo_template",
-                json.dumps(template_data)
-            )
-
-            show_info("💾 Plantilla guardada correctamente")
-
-        except Exception as ex:
-            show_error(f"Error guardando plantilla: {ex}")
-
-
-    # ── Cargar plantilla ─────────────────────────────────────────────
     async def load_template(e):
-        try:
-            raw = await page.shared_preferences.get("bingo_template")
-
-            if not raw:
-                show_error("No hay plantilla guardada")
-                return
-
-            data = json.loads(raw)
-
-            if "tasks" not in data:
-                show_error("Plantilla inválida")
-                return
-
-            # Restaurar tamaño
-            size_value = str(data.get("size", "3"))
-
-            size_dd.value = size_value
-            state["size"] = int(size_value)
-
-            # Limpiar casillas anteriores
-            board_inputs.controls.clear()
-
-            # Reconstruir tablero
-            for i, task in enumerate(data["tasks"]):
-                board_inputs.controls.append(
-                    ft.TextField(
-                        value=task,
-                        label=f"Casilla {i+1}",
-                        dense=True,
-                        border_color=C_PRIMARY,
-                        focused_border_color=C_ACCENT,
-                        color=C_TEXT,
-                        bgcolor=C_NEUTRAL,
-                        border_radius=10,
-                    )
+        raw = await page.shared_preferences.get("bingo_template")
+        if not raw:
+            show_error("No hay plantilla guardada"); return
+        data = json.loads(raw)
+        if "tasks" not in data:
+            show_error("Plantilla invalida"); return
+        size_dd.value = str(data.get("size", "3"))
+        state["size"] = int(size_dd.value)
+        board_inputs.controls.clear()
+        for i, task in enumerate(data["tasks"]):
+            board_inputs.controls.append(
+                ft.TextField(
+                    value=task, label=f"Casilla {i+1}", dense=True,
+                    border_color=C_PRIMARY, focused_border_color=C_ACCENT,
+                    color=C_TEXT, bgcolor=C_NEUTRAL, border_radius=10,
                 )
+            )
+        page.update()
+        show_info("Plantilla cargada")
 
-            page.update()
+    def update_cell(index: int, selected: bool):
+        cell = state["cells"].get(index)
+        if not cell: return
+        cell.bgcolor = C_SUCCESS if selected else C_NEUTRAL
+        cell.border  = ft.Border.all(2, C_SUCCESS) if selected else ft.Border.all(1, C_PRIMARY + "55")
+        page.update()
 
-            show_info("📂 Plantilla cargada correctamente")
-
-        except Exception as ex:
-            show_error(f"Error cargando plantilla: {ex}")
-    # ── Disparadores de Red Seguros ──────────────────────────────────────────
+    # ── Clicks de red ─────────────────────────────────────────────────────────
     def click_create_room(e):
-        print("CLICK CREAR")
-
         uname = username_tf.value.strip()
         rname = new_room_tf.value.strip()
-
-        print("username =", uname)
-        print("room =", rname)
-
-        try:
-            state["username"] = uname
-
-            print("ANTES run_async_network")
-
-            run_async_network(
-                connect_and_send_ws({
-                    "type": "create_room",
-                    "room": rname,
-                    "username": uname,
-                })
-            )
-
-            print("DESPUÉS run_async_network")
-
-        except Exception as ex:
-            print("ERROR:", ex)
+        if not uname or not rname:
+            show_error("Escribe tu nombre y el nombre de sala."); return
+        state["username"] = uname
+        run_async_network(connect_and_send_ws({
+            "type": "create_room", "room": rname,
+            "username": uname, "client_id": state["client_id"],
+        }))
 
     def click_join_room(e):
         uname = username_tf.value.strip()
         rname = room_tf.value.strip()
         if not uname or not rname:
-            show_error("Escribe tu nombre y el código de sala."); return
+            show_error("Escribe tu nombre y el codigo de sala."); return
         state["username"] = uname
         run_async_network(connect_and_send_ws({
-            "type": "join_room", "room": rname, "username": uname
+            "type": "join_room", "room": rname,
+            "username": uname, "client_id": state["client_id"],
         }))
 
     def click_send_tasks(e):
         if not state["ws"] or not state["connected"]:
-            show_error("No estás conectado a ninguna sala online."); return
+            show_error("No estas conectado."); return
         if not board_inputs.controls:
             show_error("Genera o carga casillas primero."); return
-            
-        tasks = [t.value.strip() if (t.value and t.value.strip()) else f"Casilla {i+1}" for i, t in enumerate(board_inputs.controls)]
-        state["tasks"] = tasks
+        tasks = [
+            (t.value.strip() if t.value and t.value.strip() else f"Casilla {i+1}")
+            for i, t in enumerate(board_inputs.controls)
+        ]
+        state["tasks"]    = tasks
         state["selected"] = set()
-        
         run_async_network(send_payload_ws({
-            "type": "set_tasks", "room": state["room"], "player": state["player"], "tasks": tasks,"size": state["size"]
+            "type": "set_tasks", "room": state["room"],
+            "player": state["player"], "tasks": tasks, "size": state["size"],
         }))
         build_game(tasks)
 
-    # ── Generador del Tablero Visual de Bingo ─────────────────────────────────
+    # ── Tablero visual ────────────────────────────────────────────────────────
     def build_game(tasks: list):
+        if not tasks: return
         grid_col.controls.clear()
-        size = state["size"]
+        state["cells"] = {}
+        size      = state["size"]
         cell_size = max(75, min(100, (page.width or 360) // size - 10))
 
         for r in range(size):
             row_cells = []
             for c in range(size):
-                idx = r * size + c
+                idx    = r * size + c
                 if idx >= len(tasks): break
-                label = tasks[idx]
+                label  = tasks[idx]
                 is_sel = idx in state["selected"]
-
-                cell = ft.Container(
-                    content=ft.Text(label, text_align=ft.TextAlign.CENTER, size=10, weight=ft.FontWeight.W_500, color=C_TEXT, max_lines=4, overflow=ft.TextOverflow.ELLIPSIS),
+                cell   = ft.Container(
+                    content=ft.Text(
+                        label, text_align=ft.TextAlign.CENTER,
+                        size=10, weight=ft.FontWeight.W_500,
+                        color=C_TEXT, max_lines=4,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                    ),
                     width=cell_size, height=cell_size,
                     bgcolor=C_SUCCESS if is_sel else C_NEUTRAL,
                     border_radius=10, alignment=ft.Alignment(0, 0), padding=5,
                     border=ft.Border.all(2, C_SUCCESS) if is_sel else ft.Border.all(1, C_PRIMARY + "55"),
                 )
+                state["cells"][idx] = cell
 
-                def make_toggle(index=idx, cell_ref=cell):
-                    def toggle_click(e):
-                        if not state["ws"] or not state["connected"]:
-                            show_error("Falta conexión"); return
+                def make_toggle(index):
+                    def toggle_click(ev):
                         if index in state["selected"]:
                             state["selected"].discard(index)
-
-                            cell_ref.bgcolor = C_NEUTRAL
-                            cell_ref.border = ft.Border.all(1, C_PRIMARY + "55")
-
+                            update_cell(index, False)
                         else:
                             state["selected"].add(index)
-
-                            cell_ref.bgcolor = C_SUCCESS
-                            cell_ref.border = ft.Border.all(2, C_SUCCESS)
-
-                        page.update()
+                            update_cell(index, True)
                         run_async_network(send_payload_ws({
-                            "type": "select", "room": state["room"], "player": state["player"], "index": index
+                            "type": "select", "room": state["room"],
+                            "player": state["player"], "index": index,
                         }))
                     return toggle_click
 
-                cell.on_click = make_toggle(idx, cell)
+                cell.on_click = make_toggle(idx)
                 row_cells.append(cell)
-            grid_col.controls.append(ft.Row(row_cells, alignment=ft.MainAxisAlignment.CENTER, spacing=6))
+            grid_col.controls.append(
+                ft.Row(row_cells, alignment=ft.MainAxisAlignment.CENTER, spacing=6)
+            )
         page.update()
 
-    # ── Composición del Layout Visual ─────────────────────────────────────────
+    # ── Layout ────────────────────────────────────────────────────────────────
     page.add(
         ft.ListView(
             expand=True, spacing=14, padding=30,
             controls=[
                 card(ft.Column([
-                    ft.Text("🎓 BINGO", size=32, weight=ft.FontWeight.BOLD, color=C_ACCENT, text_align=ft.TextAlign.CENTER),
-                    ft.Text("de Graduación", size=16, color=C_MUTED, text_align=ft.TextAlign.CENTER),
+                    ft.Text("BINGO", size=32, weight=ft.FontWeight.BOLD,
+                            color=C_ACCENT, text_align=ft.TextAlign.CENTER),
+                    ft.Text("de Graduacion", size=16, color=C_MUTED,
+                            text_align=ft.TextAlign.CENTER),
                     ft.Divider(color=C_PRIMARY + "55"),
-                    ft.Row([status_icon, status_label,timer_text,refresh_btn], spacing=8),
+                    ft.Row([status_icon, status_label, timer_text, refresh_btn], spacing=8),
                 ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=6), padding=20),
 
                 card(ft.Column([
-                    ft.Text("1️⃣  Tu nombre", size=16, weight=ft.FontWeight.BOLD, color=C_TEXT),
+                    ft.Text("1  Tu nombre", size=16,
+                            weight=ft.FontWeight.BOLD, color=C_TEXT),
                     username_tf,
                 ], spacing=10)),
 
                 card(ft.Column([
-                    ft.Text("2️⃣  Sala multijugador", size=16, weight=ft.FontWeight.BOLD, color=C_TEXT),
-                    ft.Row([ft.Container(new_room_tf, expand=True), primary_btn("Crear", click_create_room)], spacing=10),
-                    ft.Row([ft.Container(room_tf, expand=True), secondary_btn("Unirse", click_join_room)], spacing=10),
+                    ft.Text("2  Sala multijugador", size=16,
+                            weight=ft.FontWeight.BOLD, color=C_TEXT),
+                    ft.Row([ft.Container(new_room_tf, expand=True),
+                            primary_btn("Crear", click_create_room)], spacing=10),
+                    ft.Row([ft.Container(room_tf, expand=True),
+                            secondary_btn("Unirse", click_join_room)], spacing=10),
                     ft.Text("Jugadores conectados:", size=13, color=C_MUTED),
                     players_col,
                 ], spacing=10)),
 
                 card(ft.Column([
-                    ft.Text("3️⃣  Configura tu cartón", size=16, weight=ft.FontWeight.BOLD, color=C_TEXT),
+                    ft.Text("3  Configura tu carton", size=16,
+                            weight=ft.FontWeight.BOLD, color=C_TEXT),
                     size_dd,
-                    ft.Row([primary_btn("🔢 Generar casillas", build_board)], alignment=ft.MainAxisAlignment.CENTER),
-                    ft.Row([secondary_btn("💾 Guardar", save_template, expand=True), secondary_btn("📂 Cargar", load_template, expand=True)], spacing=10),
+                    ft.Row([primary_btn("Generar casillas", build_board)],
+                           alignment=ft.MainAxisAlignment.CENTER),
+                    ft.Row([
+                        secondary_btn("Guardar plantilla", save_template, expand=True),
+                        secondary_btn("Cargar plantilla", load_template, expand=True),
+                    ], spacing=10),
                     ft.Divider(color=C_PRIMARY + "33"),
                     board_inputs,
                     ft.Container(height=4),
-                    ft.Row([primary_btn("🚀 Activar tablero", click_send_tasks)], alignment=ft.MainAxisAlignment.CENTER),
+                    ft.Row([primary_btn("Activar tablero", click_send_tasks)],
+                           alignment=ft.MainAxisAlignment.CENTER),
                 ], spacing=10)),
 
                 card(ft.Column([
-                    ft.Text("🎯 Tu cartón", size=18, weight=ft.FontWeight.BOLD, color=C_TEXT, text_align=ft.TextAlign.CENTER),
-                    ft.Text("Toca las casillas que hayas completado", size=12, color=C_MUTED, text_align=ft.TextAlign.CENTER),
+                    ft.Text("Tu carton", size=18, weight=ft.FontWeight.BOLD,
+                            color=C_TEXT, text_align=ft.TextAlign.CENTER),
+                    ft.Text("Toca las casillas completadas", size=12,
+                            color=C_MUTED, text_align=ft.TextAlign.CENTER),
                     ft.Container(
-                    content=ft.Column(
-                    controls=[
-            ft.Row(
-                controls=[grid_col],
-                scroll=ft.ScrollMode.AUTO
-            )
-        ],
-        scroll=ft.ScrollMode.AUTO
-    ),
-    height=500,
-)
+                        content=ft.Column(
+                            controls=[ft.Row(controls=[grid_col],
+                                            scroll=ft.ScrollMode.AUTO)],
+                            scroll=ft.ScrollMode.AUTO,
+                        ),
+                        height=500,
+                    ),
                 ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10), padding=16),
 
                 card(ft.Column([
-                    ft.Text("🏆 Ranking en vivo", size=18, weight=ft.FontWeight.BOLD, color=C_TEXT),
+                    ft.Text("Ranking en vivo", size=18,
+                            weight=ft.FontWeight.BOLD, color=C_TEXT),
                     ft.Container(
-    content=ranking_col,
-    expand=False,
-    height=250,
-    padding=10,
-    border_radius=12,
-    bgcolor=C_SURFACE,
-)
-                        ], spacing=8))
-            ]
+                        content=ranking_col, height=250,
+                        padding=10, border_radius=12, bgcolor=C_SURFACE,
+                    ),
+                ], spacing=8)),
+            ],
         )
     )
-ft.run(main, port=int(os.environ.get("PORT", 8080)), host="0.0.0.0")
+
+    # ── ARRANQUE: cargar client_id y reconectar ───────────────────────────────
+    # FIX: usamos page.run_task() para ejecutar código async en el arranque
+    # correctamente dentro del contexto de Flet, SIN asyncio.create_task()
+    page.run_task(load_and_reconnect)
+
+
+ft.app(target=main, port=int(os.environ.get("PORT", 8080)), host="0.0.0.0")
+
