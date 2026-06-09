@@ -1,8 +1,10 @@
 import asyncio
+
 import websockets
 import json
 import time
 import os
+import uuid
 
 PING_INTERVAL = 20
 TIMEOUT = 40
@@ -17,14 +19,17 @@ rooms = {}
 # -----------------------------
 def create_room(name):
     name = name.lower().strip()
-
+    
     if name in rooms:
         return None
 
     rooms[name] = {
         "players": {},
         "start_time": time.time(),
-        "size": None,  # <-- IMPORTANTE (dinámico)
+
+        "size": None,
+        "tasks": [],
+
         "first_line_done": False,
         "first_bingo_done": False
     }
@@ -35,25 +40,32 @@ def create_room(name):
 # -----------------------------
 # PLAYER
 # -----------------------------
-def add_player(room_name, ws, username):
+def add_player(room_name, ws, username, client_id=None):
     room = rooms[room_name]
     username = username.strip().lower()
 
     for pid, p in room["players"].items():
-        if p["username"] == username:
+        if p["client_id"] == client_id:
             p["ws"] = ws
+            p["connected"] = True
             return pid
 
     pid = f"p{len(room['players']) + 1}"
 
     room["players"][pid] = {
+        "client_id": client_id,
         "username": username,
         "ws": ws,
         "selected": set(),
         "score": 0,
         "lines_awarded": set(),
         "bingo_awarded": False,
-        "cells_marked": 0
+        "cells_marked": 0,
+        "connected": True,
+
+        # NUEVO
+        "size": None,
+        "tasks": []
     }
 
     return pid
@@ -95,6 +107,7 @@ async def broadcast(room):
             "player": p["username"],
             "score": p["score"],
             "selected": len(p["selected"])
+            
         }
         for p in room["players"].values()
     ]
@@ -103,19 +116,27 @@ async def broadcast(room):
         "type": "update",
         "players": players_list,
         "ranking": sorted(players_list, key=lambda x: x["score"], reverse=True),
-        "time": int(time.time() - room["start_time"])
+        "time": int(time.time() - room["start_time"]),
+        "size": room.get("size"),
+        "tasks": room.get("tasks"),
+        "selected": {
+            pid: list(p["selected"])
+            for pid, p in room["players"].items()
+        }
     }
 
     dead = []
 
     for pid, p in room["players"].items():
+
+        if not p.get("connected", True):
+            continue
+
         try:
             await p["ws"].send(json.dumps(msg))
-        except:
-            dead.append(pid)
 
-    for pid in dead:
-        room["players"].pop(pid, None)
+        except:
+            p["connected"] = False
 
 
 # -----------------------------
@@ -138,30 +159,72 @@ async def handler(ws):
                     await ws.send(json.dumps({"type": "error", "msg": "room exists"}))
                     continue
 
-                player_id = add_player(room_name, ws, data["username"])
+                client_id = data.get("client_id") or str(uuid.uuid4())
+
+                player_id = add_player(
+                    room_name,
+                    ws,
+                    data["username"],
+                    client_id
+                )
 
                 await ws.send(json.dumps({
                     "type": "joined",
                     "room": room_name,
-                    "player": player_id
+                    "player": player_id,
+                    "client_id": client_id
                 }))
-
                 await broadcast(rooms[room_name])
+            elif t == "reconnect":
+                client_id = data.get("client_id")
+
+                for found_room_name, room in rooms.items():
+                    for pid, p in room["players"].items():
+
+                        if p["client_id"] == client_id:
+
+                            room_name = found_room_name
+                            player_id = pid
+
+                            p["ws"] = ws
+                            p["connected"] = True
+
+                            await ws.send(json.dumps({
+                                "type": "reconnected",
+                                "room": room_name,
+                                "player": pid,
+                                "selected": list(p["selected"]),
+                                "score": p["score"],
+                                "size": p["size"],
+                                "tasks": p["tasks"]
+                            }))
+
+                            await broadcast(room)
+                            continue
 
             # ---------------- JOIN ROOM
             elif t == "join_room":
                 room_name = data["room"].lower().strip()
-
+                client_id = data.get("client_id")
                 if room_name not in rooms:
                     await ws.send(json.dumps({"type": "error", "msg": "room not found"}))
                     continue
 
-                player_id = add_player(room_name, ws, data["username"])
+                client_id = data.get("client_id") or str(uuid.uuid4())
+                
+                print("CLIENT ID RECIBIDO:", client_id)
+                player_id = add_player(
+                    room_name,
+                    ws,
+                    data["username"],
+                    client_id
+                )
 
                 await ws.send(json.dumps({
                     "type": "joined",
                     "room": room_name,
-                    "player": player_id
+                    "player": player_id,
+                    "client_id": client_id
                 }))
 
                 await broadcast(rooms[room_name])
@@ -169,8 +232,15 @@ async def handler(ws):
             # ---------------- SET SIZE (IMPORTANTE)
             elif t == "set_tasks":
                 room = rooms[room_name]
-                room["size"] = int(data["size"])
-                print("SIZE RECIBIDO:", room["size"])
+                player = room["players"][player_id]
+
+                player["size"] = int(data["size"])
+                player["tasks"] = data["tasks"]
+                
+                room["size"] = player["size"]
+                room["tasks"] = player["tasks"]
+                print("SIZE:", player["size"])
+                print("TASKS:", len(player["tasks"]))
             # ---------------- SELECT
             # PUNTUACIONES
             elif t == "select":
@@ -184,6 +254,8 @@ async def handler(ws):
 
                 room = rooms[room_name]
                 player = room["players"][player_id]
+                print("PLAYER ID:", player_id)
+                print("SCORE ANTES:", player["score"])
 
                 idx = data["index"]
 
@@ -197,18 +269,21 @@ async def handler(ws):
                 # TOGGLE CASILLA
                 # -----------------------------
                 if idx in player["selected"]:
-                    player["selected"].remove(idx)
-
+                    await ws.send(json.dumps({
+                        "type": "already_selected",
+                        "index": idx
+                    }))
+                    return
                 else:
                     player["selected"].add(idx)
 
                     earned = int(CELL_POINTS * multiplier)
                     player["score"] += earned
-
+        
                 # -----------------------------
                 # TAMAÑO
                 # -----------------------------
-                size = room.get("size") or 3
+                size = player.get("size") or 3
 
                 # -----------------------------
                 # LÍNEAS
@@ -281,9 +356,14 @@ async def handler(ws):
     except Exception as e:
         print("ERROR:", e)
 
+
     finally:
-        if room_name and room_name in rooms:
-            rooms[room_name]["players"].pop(player_id, None)
+        if (
+            room_name
+            and room_name in rooms
+            and player_id in rooms[room_name]["players"]
+        ):
+            rooms[room_name]["players"][player_id]["connected"] = False
 
 
 # -----------------------------
@@ -302,6 +382,7 @@ async def main():
         ping_timeout=TIMEOUT
     ):
         await asyncio.Future()
+    
 
 
 if __name__ == "__main__":
