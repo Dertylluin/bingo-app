@@ -464,9 +464,9 @@ def main(page: ft.Page):
             expand=True, spacing=14, padding=30,
             controls=[
                 card(ft.Column([
-                    ft.Text("BINGO", size=32, weight=ft.FontWeight.BOLD,
+                    ft.Text(" 🎓 BINGO", size=32, weight=ft.FontWeight.BOLD,
                             color=C_ACCENT, text_align=ft.TextAlign.CENTER),
-                    ft.Text("de Graduacion", size=16, color=C_MUTED,
+                    ft.Text("de la Graduacion", size=16, color=C_MUTED,
                             text_align=ft.TextAlign.CENTER),
                     ft.Divider(color=C_PRIMARY + "55"),
                     ft.Row([status_icon, status_label, timer_text, refresh_btn], spacing=8),
